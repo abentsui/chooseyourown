@@ -1,0 +1,763 @@
+---
+title: "Report on Dry Bean Dataset"
+author: "Ngai Chun Tsui"
+date: "3/29/2021"
+output: 
+  pdf_document:
+    toc: yes
+    toc_depth: '3'
+    number_sections: true
+geometry: margin = 1.2in
+fontsize: 11
+urlcolor: blue
+---
+
+****
+
+```{r setup, include=FALSE}
+
+# Reading excel
+if(!require(readxl)) install.packages("readxl", repos = "http://cran.us.r-project.org")
+# Streamline the model training process for complex regression and classification problems
+if(!require(caret)) install.packages("caret", repos = "http://cran.us.r-project.org")
+# Basic data analysis
+if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
+# For multinomial log-linear models
+if(!require(nnet)) install.packages("nnet", repos = "http://cran.us.r-project.org")
+# Show multiple plots in grid
+if(!require(gridExtra)) install.packages("gridExtra", repos = "http://cran.us.r-project.org")
+# For Markdown PDF report
+if(!require(tinytex)) install.packages("tinytex", repos = "http://cran.us.r-project.org")
+
+
+library(readxl)
+library(caret)
+library(tidyverse)
+library(nnet)
+library(gridExtra)
+library(tinytex)
+
+```
+
+# Overview
+Our project is about identification of dry beans. Images of 13,611 grains of 7 different registered dry beans were taken with a high-resolution camera. We have a total of 16 features: 12 dimensions and 4 shape forms.
+
+Identification of dry beans is useful because it may allow us to classify them into the correct classes for commercial trading. It may be helpful for botanists to identify them for study. The technique may also be applied in identification of other types of plant or food.
+
+
+## Project Overview
+The project mainly consists of 4 parts. 
+
+1. Overview: An overview of the project
+2. Analysis: We study and explore the data. We visualize the data to gain some insights. Then we try fitting different models to predict the result.
+3. Results: We compare the accuracy of different models and see which one is the best.
+4. Conclusion: A brief conclusion, limitation and future work to improve on this project.
+
+As for the most important part - model fitting, we separate the data set into train and test datasets. For each model, the train data set will be used for training model and the test dataset is used for testing accuracy. Since this problem is to identity dry bean as one of the seven classes, this is a classification problem. We use accuracy as our measurement (percentage of correct prediction in test set). 
+
+
+## Problem Overview
+The seven classes of dry beans are: 
+**Barbunya, Bombay, Cali, Dermosan, Horoz, Seker, Sira**
+
+The features information:
+
+1. Area (A): The area of a bean zone and the number of pixels within its boundaries.
+2. Perimeter (P): Bean circumference is defined as the length of its border.
+3. Major axis length (L): The distance between the ends of the longest line that can be drawn from a bean.
+4. Minor axis length (l): The longest line that can be drawn from the bean while standing perpendicular to the main axis.
+5. Aspect ratio (K): Defines the relationship between L and l.
+6. Eccentricity (Ec): Eccentricity of the ellipse having the same moments as the region.
+7. Convex area (C): Number of pixels in the smallest convex polygon that can contain the area of a bean seed.
+8. Equivalent diameter (Ed): The diameter of a circle having the same area as a bean seed area.
+9. Extent (Ex): The ratio of the pixels in the bounding box to the bean area.
+10. Solidity (S): Also known as convexity. The ratio of the pixels in the convex shell to those found in beans.
+11. Roundness (R): Calculated with the following formula: (4piA)/(P^2)
+12. Compactness (CO): Measures the roundness of an object: Ed/L
+13. ShapeFactor1 (SF1)
+14. ShapeFactor2 (SF2)
+15. ShapeFactor3 (SF3)
+16. ShapeFactor4 (SF4)
+
+
+## Project Data (Step 1 in R file)
+The data can be found in UCI Machine Learning Repository:
+https://archive.ics.uci.edu/ml/machine-learning-databases/00602/DryBeanDataset.zip
+
+The background information of the dataset:
+https://archive.ics.uci.edu/ml/datasets/Dry+Bean+Dataset
+
+We download the zip file from the link and then unzip it. We then use read_excel() to read the excel file. We save the read data frame into a rda file. This can save us time as we don't have to donwload again every time we start testing.
+
+```{r datasets, echo = TRUE}
+
+# Download Dry Bean Dataset
+# If the script is already run, we can get from the rda file.
+if (file.exists("drybeans.rda") == TRUE) {
+  # load the rda file
+  load("drybeans.rda")
+  
+} else {
+  # Else we download from the link
+  dl <- tempfile()
+  download.file("https://archive.ics.uci.edu/ml/machine-learning-databases/00602/DryBeanDataset.zip", dl)
+  
+  excel_file <- unzip(dl, "DryBeanDataset/Dry_Bean_Dataset.xlsx")
+  drybeans <- read_excel(excel_file)
+  
+  # Save file for faster processing
+  save(drybeans, file = "drybeans.rda")
+  
+  rm(dl)
+}
+
+```
+
+
+****
+
+# Analysis
+
+## Data Wrangling (Step 2 in R file)
+We do some data wrangling so the data are easier for analysis. We divide the dataset into 90% train set and 10% test set. We choose 90/10 split ratio because it is commonly used in data analysis.
+
+```{r wrangling, echo = TRUE, warning = FALSE}
+# Make Class as a factor
+drybeans <- drybeans %>%
+  mutate(Class = as.factor(Class))
+
+# Divide the set into train and test set
+# 90% train set, 10% test set
+set.seed(1) #Random sampling
+test_index <- createDataPartition(y = drybeans$Class, times = 1, p = 0.1, list = FALSE)
+test_set <- drybeans[test_index,]
+train_set <- drybeans[-test_index,]
+```
+
+
+## Data Exploration (Step 3 in R file)
+The data has 13611 rows and 16 features. The features are explained in Problem Overview section. We will see the summary of the data frame and the first 4 rows of the data.
+We can see that the first 16 columns are the features and the final column 'Class' is our target. The features are all numeric values and this makes our analysis easier.
+
+```{r brief_data_study, echo = TRUE}
+
+# number of rows 
+nrow(drybeans)
+# number of columns (One column 'Class' is the outcome)
+ncol(drybeans)
+
+# summary
+summary(drybeans)
+
+# The first 4 rows of the data
+drybeans[1:4, 1:6] %>%
+  knitr::kable()
+
+drybeans[1:4, 7:12] %>%
+  knitr::kable()
+
+drybeans[1:4, 13:17] %>%
+  knitr::kable()
+```
+
+From the barchart, we can see that Dermason bean has the most number of samples and Bombay has the least number of samples.
+
+```{r barchart_class, echo = FALSE, fig_align = 'left'}
+
+# Barchart of Class
+drybeans %>%
+  ggplot(aes(Class)) +
+  geom_bar()
+```
+
+
+### Box Plots of Data of Each Feature Grouped by Class (Step 3a in R file)
+We study the box plots of each feature grouped by class.
+
+```{r boxplot, echo = FALSE, eval = TRUE, fig_align = 'left'}
+
+# Area
+g1 <- drybeans %>%
+  ggplot(aes(Class, Area, fill = Class)) +
+  geom_boxplot() +
+  theme(axis.text.x = element_blank())
+
+# Perimeter
+g2 <- drybeans %>%
+  ggplot(aes(Class, Perimeter, fill = Class)) +
+  geom_boxplot() +
+  theme(axis.text.x = element_blank())
+
+# MajorAxisLength
+g3 <- drybeans %>%
+  ggplot(aes(Class, MajorAxisLength, fill = Class)) +
+  geom_boxplot() +
+  theme(axis.text.x = element_blank())
+
+# MinorAxisLength
+g4 <- drybeans %>%
+  ggplot(aes(Class, MinorAxisLength, fill = Class)) +
+  geom_boxplot() +
+  theme(axis.text.x = element_blank())
+
+# AspectRation
+g5 <- drybeans %>%
+  ggplot(aes(Class, AspectRation, fill = Class)) +
+  geom_boxplot() +
+  theme(axis.text.x = element_blank())
+
+# Eccentricity
+g6 <- drybeans %>%
+  ggplot(aes(Class, Eccentricity, fill = Class)) +
+  geom_boxplot() +
+  theme(axis.text.x = element_blank())
+
+# ConvexArea
+g7 <- drybeans %>%
+  ggplot(aes(Class, ConvexArea, fill = Class)) +
+  geom_boxplot() +
+  theme(axis.text.x = element_blank())
+
+# EquivDiameter
+g8 <- drybeans %>%
+  ggplot(aes(Class, EquivDiameter, fill = Class)) +
+  geom_boxplot() +
+  theme(axis.text.x = element_blank())
+
+# Extent
+g9 <- drybeans %>%
+  ggplot(aes(Class, Extent, fill = Class)) +
+  geom_boxplot() +
+  theme(axis.text.x = element_blank())
+
+# Solidity
+g10 <- drybeans %>%
+  ggplot(aes(Class, Solidity, fill = Class)) +
+  geom_boxplot() +
+  theme(axis.text.x = element_blank())
+
+# roundness
+g11 <- drybeans %>%
+  ggplot(aes(Class, roundness, fill = Class)) +
+  geom_boxplot() +
+  theme(axis.text.x = element_blank())
+
+# Compactness
+g12 <- drybeans %>%
+  ggplot(aes(Class, Compactness, fill = Class)) +
+  geom_boxplot() +
+  theme(axis.text.x = element_blank())
+
+# ShapeFactor1
+g13 <- drybeans %>%
+  ggplot(aes(Class, ShapeFactor1, fill = Class)) +
+  geom_boxplot() +
+  theme(axis.text.x = element_blank())
+
+# ShapeFactor2
+g14 <- drybeans %>%
+  ggplot(aes(Class, ShapeFactor2, fill = Class)) +
+  geom_boxplot() +
+  theme(axis.text.x = element_blank())
+
+# ShapeFactor3
+g15 <- drybeans %>%
+  ggplot(aes(Class, ShapeFactor3, fill = Class)) +
+  geom_boxplot() +
+  theme(axis.text.x = element_blank())
+
+# ShapeFactor4
+g16 <- drybeans %>%
+  ggplot(aes(Class, ShapeFactor4, fill = Class)) +
+  geom_boxplot() +
+  theme(axis.text.x = element_blank())
+
+grid.arrange(g1, g2, g3, g4, ncol = 2)
+grid.arrange(g5, g6, g7, g8, ncol = 2)
+grid.arrange(g9, g10, g11, g12, ncol = 2)
+grid.arrange(g13, g14, g15, g16, ncol = 2)
+
+```
+
+From the plots, we can see that Area, MinorAxisLength and ShapeFactor1 may be useful feature to determine if a bean is of Bombay type, as the boxplots of those features almost do not overlap with those of other types. Solidity seems not quite useful in prediction as we see most of the boxplots overlap with each other. This gives us some insights when we build models to predict.
+
+
+### Check Multivariate Normal Assumption (Step 3b in R file)
+We use scatter plot to check if mulitvariate normal assumption holds for conditional probability of predictors given Class. However, there are 16 predictors and cross comparison will be a laborious task. We only pick a few of them to see.
+
+Area vs Perimeter
+
+```{r area_peri_plot, echo = FALSE, eval = TRUE, fig_align = 'left'}
+# Area vs Perimeter
+drybeans %>%
+  ggplot(aes(Area, Perimeter, color = Class)) +
+  geom_point() +
+  stat_ellipse(type = "norm", lwd = 0.5)
+```
+
+Area vs Solidity
+
+```{r area_solid_plot, echo = FALSE, eval = TRUE, fig_align = 'left'}
+# Area vs Solidity
+drybeans %>%
+  ggplot(aes(Area, Solidity, color = Class)) +
+  geom_point() +
+  stat_ellipse(type = "norm", lwd = 0.5)
+```
+
+Area vs ShapeFactor4
+
+```{r area_sf4_plot, echo = FALSE, eval = TRUE, fig_align = 'left'}
+drybeans %>%
+  ggplot(aes(Area, ShapeFactor4, color = Class)) +
+  geom_point() +
+  stat_ellipse(type = "norm", lwd = 0.5)
+```
+
+
+## Model Fitting (Step 4 in R file)
+
+The problem of interest is a classification problem. Hence, we use accuracy as the measure of effectiveness of our models. Accuracy is defined as the proportion of correct guessing in the test set. We want to pick a model with the highest accuracy.
+
+```{r model_prep, echo = FALSE}
+
+# "BARBUNYA" "BOMBAY" "CALI" "DERMASON" "HOROZ" "SEKER" "SIRA" 
+class_vec <- levels(drybeans$Class)
+
+```
+
+### Model 1: Guessing with Proportion of Each Class in Train Set (Step 4a in R file)
+In model 1, we start with a very simple model, pure guessing. As the proportion of each Class in the data is different, we use the proportion as the probability vector in sampling. 
+
+```{r guessing, include = TRUE, warning = FALSE}
+
+# Method 1: Get the proportion of each class in train set
+# and we use it as the probability vector in sampling
+prop <- train_set %>%
+  group_by(Class) %>%
+  summarize(n = n()) %>%
+  .$n
+
+# Probability vector
+prop <- prop/nrow(train_set)
+prop
+
+# Sampling
+y_hat_guess <- sample(class_vec, nrow(test_set), replace = TRUE, prob = prop) %>%
+  factor()
+
+# Use confustionMatrix() to get accuracy
+conf_mat <- confusionMatrix(data = y_hat_guess, reference = test_set$Class)
+conf_mat
+
+# Accuracy table to compare results of different models
+acc_results <- tibble("Method" = "Guessing with Proportion",
+                      Accuracy = conf_mat$overall["Accuracy"])
+acc_results %>% knitr::kable()
+
+```
+
+
+### Model 2: Multinomial Logistic Regression (Step 4b in R file)
+Multinomial logistic regression is used to model nominal outcome variables, in which the log odds of the outcomes are modeled as a linear combination of the predictor variables.
+
+This project is an example of nominal outcome variables. The Class we want to predict includes 7 types of beans (Barbunya, Bombay, Cali, Dermosan, Horoz, Seker, Sira). We use multinom function inside nnet package to do the regression.
+
+In the model, we choose a level to be our baseline. In the R file, we do this by specifying in the relevel() function. We choose Barbunya as our baseline. The model assumes that the log of the odds of the outcomes is a linear combination of predictor variables. For example:
+
+$$ ln(P(Class = Bombay)/P(Class = Barbunya)) = b_{1,0} + b_{1,1}Area + b_{1,2}Perimeter + ... + b_{1,16}ShapeFactor4 $$
+$$ ln(P(Class = Cali)/P(Class = Barbunya)) = b_{2,0} + b_{2,1}Area + b_{2,2}Perimeter + ... + b_{2,16}ShapeFactor4 $$
+
+As there are 7 classes, there will be 6 linear formulas. The parameters can be interpreted as:
+
+E.g. $b_{1,1}$ is the increase/decrease in the log odds of being in Bombay v.s. Barbunya for each unit increase in Area.
+
+The results of the models:
+```{r multinom, echo = TRUE, message = FALSE, warning = FALSE, eval = TRUE}
+
+# Method 2: Multinomial Logistic Regression
+# Create a duplicate of train and test set. We will relevel and set the base line level to do regression.
+train_set2 <- train_set
+train_set2$Class <- relevel(train_set2$Class, ref = "BARBUNYA")
+
+test_set2 <- test_set
+test_set2$Class <- relevel(test_set2$Class, ref = "BARBUNYA")
+
+# Perform multinomial logistic regression
+fit_multinom <- multinom(Class ~ ., data = train_set2)
+summary(fit_multinom)
+
+# Predict probability with multinorm model
+p_hat_multinom <- predict(fit_multinom, newdata = test_set2, type = "probs")
+
+# Pick the highest probability one as our prediction
+y_hat_multinom <- class_vec[apply(p_hat_multinom, 1, which.max)] %>%
+  factor()
+conf_mat <- confusionMatrix(data = y_hat_multinom, reference = test_set$Class)
+
+# Append results to accurcay table
+acc_results <- bind_rows(acc_results, tibble("Method" = "Multinomial Logistic Regression",
+                      Accuracy = conf_mat$overall["Accuracy"]))
+acc_results %>% knitr::kable()
+
+
+```
+
+For the coefficients part in the summary of the fitted model, there are six rows. It is because we have six linear formula corresponding to 6 other classes against the baseline Barbunya.
+
+
+### Model 3: Multinomial Logistic Regression with Cross Validation (Step 4c in R file)
+Model 2 only uses one data set to train model. To improve accuracy, we can use multiple data sets to train the model. This can be done by cross validation. We will use train() function to do this. In later models, we also use train() function to do cross validation. We set trainControl so that we train with 5 validatiom samples, each comprises of 10% of observations.
+
+```{r cv_setup, echo = TRUE}
+
+# Set control with train: 5 validation samples comprise of 10% of observations each
+control <- trainControl(method = "cv", number = 5, p = 0.9)
+
+```
+
+
+```{r multinom_cv, echo = TRUE, eval = TRUE, warning = FALSE}
+
+# Model 3: Multinom with train
+
+# train with multinom model
+fit_multinom_tr <- train(Class ~ .,
+                         data = train_set,
+                         method = "multinom",
+                         trControl = control,
+                         trace = FALSE)
+# Predicted probability
+p_hat_multinom_tr <- predict(fit_multinom_tr, newdata = test_set, type = "prob")
+# Predicted outcome
+y_hat_multinom_tr <- predict(fit_multinom_tr, newdata = test_set, type = "raw")
+
+conf_mat <- confusionMatrix(data = y_hat_multinom_tr, reference = test_set$Class)
+
+# Append results to accurcay table
+acc_results <- bind_rows(acc_results, tibble("Method" = "Multinomial Logistic Regression with CV",
+                                             Accuracy = conf_mat$overall["Accuracy"]))
+acc_results %>% knitr::kable()
+
+```
+
+
+### Model 4: Knn Model with Cross Validation (Step 4d in R file)
+Knn model searches for the k-th nearest neighbours to a target. It uses a majority rule to make a prediction.
+
+Results:
+```{r knn_cv, echo = TRUE, eval = TRUE, warning = FALSE}
+
+# Method 4: Knn with train()
+fit_knn_tr <- train(Class ~ .,
+                    data = train_set,
+                    method = "knn",
+                    trControl = control,
+                    tuneGrid = data.frame(k = seq(1, 21, by = 2)))
+ggplot(fit_knn_tr, highlight = TRUE)
+
+# Predicted probability
+p_hat_knn_tr <- predict(fit_knn_tr, newdata = test_set, type = "prob")
+# Predicted outcome
+y_hat_knn_tr <- predict(fit_knn_tr, newdata = test_set, type = "raw")
+
+conf_mat <- confusionMatrix(data = y_hat_knn_tr, reference = test_set$Class)
+
+# Append results to accurcay table
+acc_results <- bind_rows(acc_results, tibble("Method" = "Knn with CV",
+                                             Accuracy = conf_mat$overall["Accuracy"]))
+acc_results %>% knitr::kable()
+
+```
+
+The Knn model seems not to be a good model. We see the best fit occurs when k = 1. We only take 1 nearest observation to make prediction. This may overtrain the model. In fact, if we allow k = 0, the best fit occurs when k = 0. This means the best prediction is the observation itself. This does not provide much useful information.
+
+
+### Model 5: QDA Model with Cross Validation (Step 4e in R file)
+QDA model is a generative model in which we assume the conditional probabilities of the predictors are multivariate normal.
+
+Results:
+```{r qda_cv, echo = TRUE, eval = TRUE, warning = FALSE}
+
+# Model 5: QDA
+# Normal assumption
+fit_qda_tr <- train(Class ~ ., method = "qda", data = train_set,
+                    trControl = control)
+
+# Predicted probability
+p_hat_qda_tr <- predict(fit_qda_tr, newdata = test_set, type = "prob")
+# Predicted outcome
+y_hat_qda_tr <- predict(fit_qda_tr, newdata = test_set, type = "raw")
+
+conf_mat <- confusionMatrix(data = y_hat_qda_tr, reference = test_set$Class)
+
+# Append results to accurcay table
+acc_results <- bind_rows(acc_results, tibble("Method" = "QDA with CV",
+                                             Accuracy = conf_mat$overall["Accuracy"]))
+acc_results %>% knitr::kable()
+
+```
+
+
+### Model 6: LDA Model with Cross Validation (Step 4f in R file)
+LDA model is a variate of generative model based on different assumptions.
+
+Results:
+```{r lda_cv, echo = TRUE, eval = TRUE, warning = FALSE}
+
+# Model 6: LDA
+fit_lda_tr <- train(Class ~ ., method = "lda", data = train_set,
+                    trControl = control)
+
+# Predicted probability
+p_hat_lda_tr <- predict(fit_lda_tr, newdata = test_set, type = "prob")
+# Predicted outcome
+y_hat_lda_tr <- predict(fit_lda_tr, newdata = test_set, type = "raw")
+
+conf_mat <- confusionMatrix(data = y_hat_lda_tr, reference = test_set$Class)
+
+# Append results to accurcay table
+acc_results <- bind_rows(acc_results, tibble("Method" = "LDA with CV",
+                                             Accuracy = conf_mat$overall["Accuracy"]))
+acc_results %>% knitr::kable()
+
+```
+
+
+### Model 7: Classification Tree Model with Cross Validation (Step 4g in R file)
+We use a classification tree to predict Class. At each tree node, there is a decision rule. Following the decision rules will bring us to the predicted value.
+
+Results:
+```{r class_tree_cv, echo = TRUE, eval = TRUE, fig_align = 'left', fig.height = 6, fig.width = 8}
+
+# Model 7: Classification Tree
+fit_rpart_tr <- train(Class ~ ., method = "rpart", data = train_set,
+                      trControl = control,
+                      tuneGrid = data.frame(cp = seq(0.01, 0.05, leng = 25)))
+
+# Predicted probability
+p_hat_rpart_tr <- predict(fit_rpart_tr, newdata = test_set, type = "prob")
+# Predicted outcome
+y_hat_rpart_tr <- predict(fit_rpart_tr, newdata = test_set, type = "raw")
+
+conf_mat <- confusionMatrix(data = y_hat_rpart_tr, reference = test_set$Class)
+
+plot(fit_rpart_tr$finalModel)
+text(fit_rpart_tr$finalModel, cex = 0.75)
+
+# Append results to accurcay table
+acc_results <- bind_rows(acc_results, tibble("Method" = "Classification Tree with CV",
+                                             Accuracy = conf_mat$overall["Accuracy"]))
+acc_results %>% knitr::kable()
+
+```
+
+
+### Model 8: Random Forest Model with Cross Validation (Step 4h in R file)
+Random forest model is like a collection of decision trees. We average out the values and make predictions. Note that this model may take 15-30 minutes to run.
+
+Results:
+```{r rf_cv, echo = TRUE, eval = TRUE}
+
+# Model 8: Random Forest
+# This may take 30 mins to run
+# May set minNode to seq(3, 50), but take longer time
+fit_rf_tr <- train(Class ~ ., method = "Rborist", data = train_set,
+                   trControl = control,
+                   tuneGrid = data.frame(predFixed = 2, minNode = seq(3, 10)))
+
+ggplot(fit_rf_tr, highlight = TRUE)
+
+# Predicted probability
+p_hat_rf_tr <- predict(fit_rf_tr, newdata = test_set, type = "prob")
+# Predicted outcome
+y_hat_rf_tr <- predict(fit_rf_tr, newdata = test_set, type = "raw")
+
+conf_mat <- confusionMatrix(data = y_hat_rf_tr, reference = test_set$Class)
+
+# Append results to accurcay table
+acc_results <- bind_rows(acc_results, tibble("Method" = "Random Forest with CV",
+                                             Accuracy = conf_mat$overall["Accuracy"]))
+acc_results %>% knitr::kable()
+
+```
+
+
+### Model 9: Ensemble (Step 4i in R file)
+We take average of the previous models and predict based on the maximum probability.
+
+Results:
+```{r ensemble, echo = TRUE, eval = TRUE}
+
+# Model 9: Ensemble
+# Take average of the previous models and predict based on the maximum probability.
+
+# Predicted probability
+p_hat_ensemble <- (p_hat_multinom_tr + p_hat_knn_tr +
+                     p_hat_qda_tr + p_hat_lda_tr +
+                     p_hat_rpart_tr + p_hat_rf_tr) / 6
+
+# The maximum probability
+p_max_ensemble <- apply(p_hat_ensemble, 1, max)
+
+# Predicted outcome
+y_hat_ensemble <- class_vec[apply(p_hat_ensemble, 1, which.max)] %>%
+  factor()
+
+conf_mat <- confusionMatrix(data = y_hat_ensemble, reference = test_set$Class)
+
+# Append results to accurcay table
+acc_results <- bind_rows(acc_results, tibble("Method" = "Ensemble with CV",
+                                             Accuracy = conf_mat$overall["Accuracy"]))
+acc_results %>% knitr::kable()
+
+```
+
+
+
+
+# Results
+
+## Results (Step 5 in R file)
+
+```{r acc_results, echo = TRUE, eval = TRUE}
+
+acc_results %>% knitr::kable()
+
+
+```
+
+
+## Further Study Why We Make Errors (Step 5a in R file)
+From the results, multinomial logistic regression, random forest and ensemble model seem to top the list in performance. Our best performing accuracy is `r max(acc_results$Accuracy)`. Is there room to improve? We are going to study the samples which we are so sure about but make mistake in predicting them.
+
+```{r further_study_1, echo = TRUE, eval = TRUE}
+
+# Check the cases we are so sure about but we make a wrong prediction
+ind <- which(y_hat_ensemble != test_set$Class)
+ind <- ind[order(p_max_ensemble[ind], decreasing = TRUE)]
+
+# Table showing the probability in ensemble and our prediction and the actual value.
+data.frame(p_hat_ensemble[ind[1:10],]) %>%
+  mutate(predict = y_hat_multinom_tr[ind[1:10]],
+         actual = test_set$Class[ind[1:10]],
+         row = ind[1:10])
+
+# Prediction under different models
+data.frame(multinom = y_hat_multinom_tr[ind[1:10]],
+           knn = y_hat_knn_tr[ind[1:10]],
+           qda = y_hat_qda_tr[ind[1:10]],
+           lda = y_hat_lda_tr[ind[1:10]],
+           rpart = y_hat_rpart_tr[ind[1:10]],
+           rf = y_hat_rf_tr[ind[1:10]],
+           actual = test_set$Class[ind[1:10]]) %>%
+  knitr::kable()
+
+```
+
+We can see that of those records which we make mistake, almost all of our models make errors in predicting the correct class. For example, for the first row in the table which shows prediction under different models, all models predict 'Horoz' but the actual class is 'Cali'.
+
+We choose the Area and AspectRation of the two classes to study. We see that Area and AspectRation of the observation is within the main chunk in Horoz boxplot but outliers in Cali boxplot.
+
+
+```{r further_study_2, echo = TRUE, eval = TRUE}
+
+# Study of the the fisrt item which we make a wrong prediction
+myrow <- ind[1]
+
+mytable <- test_set %>%
+  slice(myrow)
+mytable
+
+# Compare of CALI & HOROZ Area
+mytable$Area
+
+# The value of the observation is marked as the red line
+drybeans %>%
+  filter(Class %in% c("CALI", "HOROZ")) %>%
+  ggplot(aes(Class, Area, fill = Class)) +
+  geom_boxplot() +
+  theme(axis.text.x = element_blank()) +
+  geom_hline(yintercept = mytable$Area, linetype = "dashed", color = "red")
+
+# Compare of CALI & HOROZ AspectRation
+mytable$AspectRation
+
+# The value of the observation is marked as the red line
+drybeans %>%
+  filter(Class %in% c("CALI", "HOROZ")) %>%
+  ggplot(aes(Class, AspectRation, fill = Class)) +
+  geom_boxplot() +
+  theme(axis.text.x = element_blank()) +
+  geom_hline(yintercept = mytable$AspectRation, linetype = "dashed", color = "red")
+
+```
+
+The red line in the plots above is the value of the observation of interest. It lies close to the middle 50% region for class 'Horoz' and on the ends of distribution for class 'Cali'. This is why the models tend to predict 'Horoz' instead of 'Cali'.
+
+We can see the number of class SDs the observation predictor values lie away from the class averages.
+```{r further_study3, echo = TRUE, eval = TRUE}
+
+# How many SDs does the statistics of the sample deviate from Class average
+cali_mean <- drybeans %>%
+  filter(Class %in% c("CALI")) %>%
+  select(-Class) %>%
+  summarize_all(mean)
+
+cali_sd <- drybeans %>%
+  filter(Class %in% c("CALI")) %>%
+  select(-Class) %>%
+  summarize_all(sd)
+
+horoz_mean <- drybeans %>%
+  filter(Class %in% c("HOROZ")) %>%
+  select(-Class) %>%
+  summarize_all(mean)
+
+horoz_sd <- drybeans %>%
+  filter(Class %in% c("HOROZ")) %>%
+  select(-Class) %>%
+  summarize_all(sd)
+
+# How many SDs does the statistics of the sample deviate from Cali average
+v1 <- mytable %>%
+  select(-Class)
+v1 <- (v1 - cali_mean)/cali_sd
+v1
+
+# Number of features that are within 2 SD from the class average
+sum(abs(v1) <= 2)
+
+# How many SDs does the statistics of the sample deviate from Horoz average
+v2 <- mytable %>%
+  select(-Class)
+v2 <- (v2 - horoz_mean)/horoz_sd
+v2
+
+# Number of features that are within 2 SD from the class average
+sum(abs(v2) <= 2)
+
+```
+
+For the statistics of Horoz, the observation of interest has all its values lying within 2 SD from the class average. However, for the statistics of Cali, the observation of interest only has 9 out of 16 values lying within 2 SD from the class average. This means we have a Cali bean with feature that resembles a Horoz bean. This is a difficult problem to tackle. Maybe there is some feature that has not been captured by the image.
+
+
+# Conclusion
+In this project, we try to build a model to identify 7 types of bean based on features obtained from high-resolution images taken from a camera. We try a total of 9 models. The maximum accuracy is `r max(acc_results$Accuracy)` and is quite satisfactory. It passes 90%. We found that multinomial logistic regression model, random forest model and ensemble model perform the best. The QDA and LDA models also provide satisfying results with slightly lower accuracy. When we studied the results which we made mistakes, we found that some beans have features that look like the other bean types. One possible reason is that the photos cannot completely reflect features of bean types. There are some features we have ignored. This may be improved in future work to increase accuracy of the models.
+
+
+****
+
+# Resources {-}
+
+The resources that I have referenced are listed here.
+
+1. KOKLU, M. and OZKAN, I.A. (2020, September 14). Dry Bean Dataset Data Set. UCI Machines Learning Repository. https://archive.ics.uci.edu/ml/datasets/Dry+Bean+Dataset (The data source)
+
+2. KOKLU, M. and OZKAN, I.A. (2020). Multiclass Classification of Dry Beans Using Computer Vision and Machine Learning Techniques. Computers and Electronics in Agriculture, 174, 105507. Science Direct.  https://www.sciencedirect.com/science/article/abs/pii/S0168169919311573?via%3Dihub (Citation request from the data source)
+
+3. (n.d.). MULTINOMIAL LOGISTIC REGRESSION | R DATA ANALYSIS EXAMPLES. UCLA: Statistical Consulting Group. https://stats.idre.ucla.edu/r/dae/multinomial-logistic-regression/ (How to use multinomial logistics regression)
+
+4. David D. (2020, October 28). R for Statistical Learning - Chapter 21 The caret Package. Retrieved March 30, 2021, from https://daviddalpiaz.github.io/r4sl/the-caret-package.html (How to train with multinom regression)
+
+
